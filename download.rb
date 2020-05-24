@@ -8,6 +8,15 @@ def log(message, data = {})
   logger.close
 end
 
+def get_password
+  `gpg --output doc --decrypt password.gpg`
+  File.open("./doc", "r") do |file|
+    password = file.readline
+  end
+
+  password
+end
+
 wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
 
 log "Opening driver..."
@@ -23,7 +32,7 @@ wait.until { driver.find_element(css: "form.Panel-form") }
 
 # Sign-in Form
 driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
-driver.find_element(css: "form.Panel-form input[type='password']").send_keys ""
+driver.find_element(css: "form.Panel-form input[type='password']").send_keys get_password
 driver.find_element(css: "form.Panel-form button[type='submit']").click
 
 # Wait for budget to load
