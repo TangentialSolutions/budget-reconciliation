@@ -1,0 +1,20 @@
+{
+  "message": "Opening driver...",
+  "data": {}
+}{
+  "message": "Navigating to main page...",
+  "data": {}
+}{
+  "message": "Unable to download CSV",
+  "data": {
+    "filename": "05-2020-EveryDollar-Transactions.csv",
+    "download_element": {
+      "element-6066-11e4-a52e-4f735466cecf": "f7a986c5-6416-4504-9561-87d6acaf22ef"
+    }
+  }
+}{
+  "message": "Successfully downloaded csv",
+  "data": {
+    "location": "~/Downloads/05-2020-EveryDollar-Transactions.csv"
+  }
+}
