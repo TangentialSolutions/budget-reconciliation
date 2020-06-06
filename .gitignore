@@ -1,2 +1,5 @@
 .idea
 *.iml
+encrypt_password.rb
+keys*
+secret.txt
