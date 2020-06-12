@@ -1,0 +1,9 @@
+version: "2"
+services:
+  chrome:
+    image: selenium/standalone-chrome
+    volumes:
+      - /dev/shm:/dev/shm
+      - ./budgets:/home/seluser/Downloads
+    ports:
+      - "4444:4444"
