@@ -1,5 +1,6 @@
 require "selenium-webdriver"
 require "json"
+require "csv"
 require "pry"
 
 DOWNLOAD_DIR = "./budgets".freeze
@@ -12,13 +13,17 @@ def log(message, data = {})
   logger.close
 end
 
-def output_discrepencies(data)
-  logger = File.open("./discrepancies.json", "a+")
+def output_discrepencies(subject, data)
+  logger = File.open("./not_tracked_in_#{subject}_discrepancies.json", "a+")
   logger.write(data.to_json)
   logger.close
 end
 
 def download_budget(driver)
+  # return CSV.read "./budgets/08-2020-EveryDollar-Transactions.csv", quote_char: "|"
+
+  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
+
   # Scroll to bottom of page
   driver.execute_script("document.querySelectorAll('.Budget-bottomActions')[0].scrollIntoView(false)")
 
@@ -40,22 +45,31 @@ def download_budget(driver)
   end
 
   log "Successfully downloaded csv", {location: "#{DOWNLOAD_DIR}/#{download_filename}"}
+  CSV.read "#{DOWNLOAD_DIR}/#{download_filename}", quote_char: "|"
 end
 
 def search_in_usaa(driver)
+  # Simple/rough cache so I don't have to peg USAA
+  file = File.open "./usaa_cache.json"
+  cached = JSON.load file
+  return cached unless cached.empty?
+
   wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
   previous_window_handle = driver.window_handle
 
+  log "Opening tab for USAA..."
   # Open new tab and navigate to usaa homepage
   driver.execute_script("window.open()")
   driver.switch_to.window( driver.window_handles.last )
   driver.navigate.to "https://www.usaa.com/"
   wait.until { driver.find_element(css: ".profileWidget") }
 
+  log "Navigating to login screen..."
   # Navigate to login screen
   driver.find_element(css: ".profileWidget .profileWidget-button--logon").click
   wait.until { driver.find_element(css: ".ent-logon-jump-body-container") }
 
+  log "Logging in..."
   # Enter login information
   driver.find_element(css: ".ent-logon-jump-input[name='j_username']").send_keys "dudeman92"
   # puts "Whats your USAA password?"
@@ -64,20 +78,25 @@ def search_in_usaa(driver)
   driver.find_element(css: ".ent-logon-jump-input[name='j_password']").send_keys "" # pass
   driver.find_element(css: ".ent-logon-jump-button").click
 
+  log "Sending verification code..."
   # Send verification code to default selected (should be text message)
   wait.until { driver.find_element(css: ".usaa-button[value='Send']") }
   driver.find_element(css: ".usaa-button[value='Send']").click
 
+  log "Prepare to enter verification code on cell..."
   wait.until { driver.find_element(css: ".notice.noticeUser") }
   puts "What was that verification code you got on your phone?"
   verification_code = gets
   verification_code = verification_code.chomp
-  document.find_element(css: "input[type='password']").send_keys verification_code
-  document.find_element(css: "button[type='submit']").click
+  driver.find_element(css: "input[type='password']").send_keys verification_code
+  driver.find_element(css: "button[type='submit']").click
 
-  wait.until { document.find_element(css: ".accountNameSection") }
+  log "Finding checking account..."
+  wait.until { driver.find_element(css: ".portalContent-container") }
+  driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
   acct = nil
   driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
+    puts "Checking element: #{e.text}"
     if e.text.include? "USAA CLASSIC CHECKING"
       acct = e
       break
@@ -85,12 +104,20 @@ def search_in_usaa(driver)
   end
   raise StandardError.new("Checking account not found.") if acct.nil?
 
+  log "Navigating to checking account page..."
   acct.click
   wait.until { driver.find_element(css: "#AccountSummaryTransactionTable") }
   purchase_amounts = []
+  log "Parsing transactions..."
+  binding.pry
   driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
-    amount_string = transaction_row.find_element(css: "td .dataQuantityNegative").value
-    description = transaction_row.find_element(css: "td .transDesc").value
+    # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
+    # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
+    # so we grab .first and are on our happy path way.
+    found_quantity = transaction_row.find_elements(css: "td .dataQuantityNegative")
+    next if found_quantity.size == 0
+    amount_string = found_quantity.first.text
+    description = transaction_row.find_element(css: "td .transDesc").text
     next if amount_string.nil?
 
     # Sanitize
@@ -98,6 +125,7 @@ def search_in_usaa(driver)
     amount_string[")"] = '' unless amount_string[")"].nil?
     amount_string[","] = '' unless amount_string[","].nil?
 
+    log "Amount found: $#{amount_string} - #{description}"
     purchase_amounts << { amount: amount_string, descr: description }
   end
 
@@ -131,39 +159,100 @@ driver.find_element(css: "form.Panel-form button[type='submit']").click
 
 # Wait for budget to load
 wait.until { driver.find_element(css: ".Budget-groupsList") }
+announcement = driver.find_elements(css: "#Modal_close")
+if announcement.size > 0
+  announcement.first.click
+end
 
-# download_budget(driver)
 usaa_transactions = search_in_usaa(driver)
-usaa_amounts = usaa_transactions.pluck(:amount)
+usaa_amounts = usaa_transactions.map {|t| t["amount"]}
+# data = download_budget(driver)
 
-driver.find_element(css: ".TransactionsTabs-tab#allocated").click
-wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card" ) }
-not_tracked_in_ed = []
-ed_easy_transactions = driver.find_element(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
-  integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").value
-  cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").value
+# log "Reconciling ED -> USAA", {data: data}
+# not_tracked_in_usaa = []
+# data.each_with_index do |item, index|
+#   # header row
+#   next if index == 0
+#
+#   # The CSV file is read in such a way that it stores the strings with double quotes **sigh**
+#   next if item[2] != "\"expense\""
+#   next unless item[3]["07"].nil?
+#   amount_string = item.last
+#
+#   # Sanitize
+#   amount_string["\""] = ""
+#   amount_string["\""] = ""
+#   amount_string["-"] = "" unless amount_string["-"].nil?
+#   log "Processing #{amount_string}"
+#   next if usaa_amounts.include? amount_string
+#
+#   log "ED amount not in USAA: #{amount_string}"
+#   not_tracked_in_usaa << {amount: amount_string, desc: item[4]}
+# end
+
+driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
+driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
+wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
+ed_transactions = []
+not_tracked_in_usaa = []
+ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
+  day_el = ed_easy_transaction_el.find_elements(css: ".day")
+  next if day_el.size == 0
+  next if day_el.first.text != "AUG"
+
+  integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").text
+  cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").text
   amount_string = "#{integer}.#{cents}"
+
+  merchant = ed_easy_transaction_el.find_element(css: ".transaction-card-merchant").text
+  budget = ed_easy_transaction_el.find_element(css: ".transaction-card-budget-item").text
+  ed_transactions << {amount: amount_string, desc: "#{merchant} - #{budget}"}
+
   next if usaa_amounts.include? amount_string
 
-  not_tracked_in_ed << usaa_transactions[usaa_amounts.find_index(amount_string)]
+  log "Discrepancy(not found in USAA) #{amount_string} for #{merchant} - #{budget}"
+  not_tracked_in_usaa << {amount: amount_string, desc: "#{merchant} - #{budget}"}
 end
 
 
-ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction|
-    integer_sum = 0
-    cents_sum = 0
-    ed_split_transaction.find_elements(css: ".split-transaction-card").each do |transaction|
-      integer_sum += transaction.find_element(css: ".money .money-integer").value.to_i
-      cents_sum += transaction.find_element(css: ".money .money-fractional").value.to_i
-    end
-    integer_sum += cents_sum / 100
-    cents_sum = cents_sum % 100
-    amount_string = "#{integer_sum}.#{cents_sum}"
-    next if usaa_amounts.include? amount_string
+ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
+  day_el = ed_split_transaction_el.find_elements(css: ".day")
+  next if day_el.size == 0
+  next if day_el.first.text != "AUG"
 
-    not_tracked_in_ed << usaa_transactions[usaa_amounts.find_index(amount_string)]
+  integer_sum = 0
+  cents_sum = 0
+  merchants = []
+  ed_split_transaction_el.find_elements(css: ".split-transaction-card").each do |transaction|
+    integer_sum += transaction.find_element(css: ".money .money-integer").text.to_i
+    cents_sum += transaction.find_element(css: ".money .money-fractional").text.to_i
+    merchant = transaction.find_element(css: ".transaction-card-merchant").text
+    budget = transaction.find_element(css: ".transaction-card-budget-item").text
+    merchants << "#{merchant} - #{budget}"
+  end
+  integer_sum += cents_sum / 100
+  cents_sum = cents_sum % 100
+  amount_string = "#{integer_sum}.#{cents_sum}"
+
+  ed_transactions << {amount: amount_string, desc: merchants.join(" & ")}
+
+  next if usaa_amounts.include? amount_string
+
+  log "Discrepancy(not found in USAA) - split transaction #{amount_string} for #{merchants.join(" & ")}"
+  not_tracked_in_usaa << {amount: amount_string, desc: merchants.join(" & ")}
 end
 
-output_discrepencies not_tracked_in_ed
+# @todo: ED infinite scroll on the transaction listings is screwing things up. How do we make js pre-load those?
+ed_amounts = ed_transactions.map {|t| t[:amount]}
+not_tracked_in_ed = []
+usaa_transactions.each do |transaction|
+  next if ed_amounts.include? transaction["amount"]
+
+  log "Discrepancy(not found in ED) - #{transaction['amount']} for #{transaction['descr']}"
+  not_tracked_in_ed << transaction
+end
+
+output_discrepencies(:usaa, not_tracked_in_usaa)
+output_discrepencies(:everdollar, not_tracked_in_ed)
 
 driver.quit
