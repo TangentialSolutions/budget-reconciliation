@@ -135,6 +135,25 @@ def search_in_usaa(driver)
   purchase_amounts
 end
 
+def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
+  day_el = ed_easy_transaction_el.find_elements(css: ".day")
+  return nil if day_el.size == 0
+  return nil if day_el.first.text != "AUG"
+
+  integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").text
+  cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").text
+  amount_string = "#{integer}.#{cents}"
+
+  merchant = ed_easy_transaction_el.find_element(css: ".transaction-card-merchant").text
+  budget = ed_easy_transaction_el.find_element(css: ".transaction-card-budget-item").text
+
+  return nil if usaa_amounts.include? amount_string
+
+  log "Discrepancy(not found in USAA) #{amount_string} for #{merchant} - #{budget}"
+
+  {amount: amount_string, desc: "#{merchant} - #{budget}"}
+end
+
 wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
 
 log "Opening driver..."
@@ -192,28 +211,25 @@ usaa_amounts = usaa_transactions.map {|t| t["amount"]}
 
 driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
 driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
+binding.pry
+# driver.execute_script("document.querySelectorAll('.Budget-bottomActions')[0].scrollIntoView(false)")
 wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
 ed_transactions = []
 not_tracked_in_usaa = []
+
+# @note: This method should run `document.querySelector('.TransactionDrawer-tabContent').scroll(0, 1000000000)` as many
+# times as necessary until the next month is reached
+# load_all_easy_transactions(driver)
+
 ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
-  day_el = ed_easy_transaction_el.find_elements(css: ".day")
-  next if day_el.size == 0
-  next if day_el.first.text != "AUG"
 
-  integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").text
-  cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").text
-  amount_string = "#{integer}.#{cents}"
+  result = scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
+  ed_transactions << result
 
-  merchant = ed_easy_transaction_el.find_element(css: ".transaction-card-merchant").text
-  budget = ed_easy_transaction_el.find_element(css: ".transaction-card-budget-item").text
-  ed_transactions << {amount: amount_string, desc: "#{merchant} - #{budget}"}
+  next if result.nil?
 
-  next if usaa_amounts.include? amount_string
-
-  log "Discrepancy(not found in USAA) #{amount_string} for #{merchant} - #{budget}"
-  not_tracked_in_usaa << {amount: amount_string, desc: "#{merchant} - #{budget}"}
+  not_tracked_in_usaa << result
 end
-
 
 ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
   day_el = ed_split_transaction_el.find_elements(css: ".day")
