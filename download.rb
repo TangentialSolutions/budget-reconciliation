@@ -249,6 +249,7 @@ ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collectio
   cents_sum = 0
   merchants = []
   ed_split_transaction_el.find_elements(css: ".split-transaction-card").each do |transaction|
+    binding.pry
     integer_sum += transaction.find_element(css: ".money .money-integer").text.to_i
     cents_sum += transaction.find_element(css: ".money .money-fractional").text.to_i
     merchant = transaction.find_element(css: ".transaction-card-merchant").text
@@ -269,6 +270,7 @@ end
 
 ed_amounts = ed_transactions.map {|t| t[:amount]}
 not_tracked_in_ed = []
+binding.pry
 usaa_transactions.each do |transaction|
   next if ed_amounts.include? transaction[:amount]
 
