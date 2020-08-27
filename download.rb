@@ -50,9 +50,10 @@ end
 
 def search_in_usaa(driver)
   # Simple/rough cache so I don't have to peg USAA
-  file = File.open "./usaa_cache.json"
-  cached = JSON.load file
-  return cached unless cached.empty?
+  # @todo Smart'en this up to check if the file exists first
+  # file = File.open "./usaa_cache.json"
+  # cached = JSON.load file
+  # return cached unless cached.empty?
 
   wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
   previous_window_handle = driver.window_handle
@@ -106,10 +107,10 @@ def search_in_usaa(driver)
 
   log "Navigating to checking account page..."
   acct.click
-  wait.until { driver.find_element(css: "#AccountSummaryTransactionTable") }
+  wait.until { driver.find_element(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr") }
   purchase_amounts = []
+
   log "Parsing transactions..."
-  binding.pry
   driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
     # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
     # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
@@ -154,6 +155,17 @@ def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
   {amount: amount_string, desc: "#{merchant} - #{budget}"}
 end
 
+def load_all_easy_transactions(driver)
+  last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
+  day_el = last_transaction_el.find_elements(css: ".day")
+
+  while (day_el.size > 0 && day_el.first.text == "AUG")
+    driver.execute_script('document.querySelector(".TransactionDrawer-tabContent").scroll(0, 1000000000)')
+    last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
+    day_el = last_transaction_el.find_elements(css: ".day")
+  end
+end
+
 wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
 
 log "Opening driver..."
@@ -184,7 +196,7 @@ if announcement.size > 0
 end
 
 usaa_transactions = search_in_usaa(driver)
-usaa_amounts = usaa_transactions.map {|t| t["amount"]}
+usaa_amounts = usaa_transactions.map {|t| t[:amount]}
 # data = download_budget(driver)
 
 # log "Reconciling ED -> USAA", {data: data}
@@ -211,15 +223,12 @@ usaa_amounts = usaa_transactions.map {|t| t["amount"]}
 
 driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
 driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
-binding.pry
-# driver.execute_script("document.querySelectorAll('.Budget-bottomActions')[0].scrollIntoView(false)")
+
 wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
 ed_transactions = []
 not_tracked_in_usaa = []
 
-# @note: This method should run `document.querySelector('.TransactionDrawer-tabContent').scroll(0, 1000000000)` as many
-# times as necessary until the next month is reached
-# load_all_easy_transactions(driver)
+load_all_easy_transactions(driver)
 
 ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
 
@@ -258,13 +267,12 @@ ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collectio
   not_tracked_in_usaa << {amount: amount_string, desc: merchants.join(" & ")}
 end
 
-# @todo: ED infinite scroll on the transaction listings is screwing things up. How do we make js pre-load those?
 ed_amounts = ed_transactions.map {|t| t[:amount]}
 not_tracked_in_ed = []
 usaa_transactions.each do |transaction|
-  next if ed_amounts.include? transaction["amount"]
+  next if ed_amounts.include? transaction[:amount]
 
-  log "Discrepancy(not found in ED) - #{transaction['amount']} for #{transaction['descr']}"
+  log "Discrepancy(not found in ED) - #{transaction[:amount]} for #{transaction[:descr]}"
   not_tracked_in_ed << transaction
 end
 
