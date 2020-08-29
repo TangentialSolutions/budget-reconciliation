@@ -3,231 +3,238 @@ require "json"
 require "csv"
 require "pry"
 
-DOWNLOAD_DIR = "./budgets".freeze
-WEBDRIVER_URL = "http://127.0.0.1:4444/wd/hub".freeze
-
-def log(message, data = {})
-  puts message
-  logger = File.open("./download.json", "a+")
-  logger.write({message: message, data: data}.to_json)
-  logger.close
-end
-
-def output_discrepencies(subject, data)
-  logger = File.open("./not_tracked_in_#{subject}_discrepancies.json", "a+")
-  logger.write(data.to_json)
-  logger.close
-end
-
-def download_budget(driver)
-  # return CSV.read "./budgets/08-2020-EveryDollar-Transactions.csv", quote_char: "|"
-
-  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
-
-  # Scroll to bottom of page
-  driver.execute_script("document.querySelectorAll('.Budget-bottomActions')[0].scrollIntoView(false)")
-
-  # Download CSV
-  download_csv_link = driver.find_element(css: ".Budget-bottomActions a.DownloadCSV")
-  download_filename = download_csv_link["download"]
-
-  log "Starting download..."
-  download_csv_link.click
-
-  log "Waiting to for download to finish..."
-  wait.until { File.exist?(File.expand_path "#{DOWNLOAD_DIR}/#{download_filename}") }
-
-  if !File.exist?(File.expand_path "#{DOWNLOAD_DIR}/#{download_filename}")
-    log "Unable to download CSV", {
-        filename: download_filename,
-        download_element: download_csv_link.as_json
-    }
+module Logger
+  def log(message, data = {})
+    puts message
+    logger = File.open("./download.json", "a+")
+    logger.write({message: message, data: data}.to_json)
+    logger.close
   end
 
-  log "Successfully downloaded csv", {location: "#{DOWNLOAD_DIR}/#{download_filename}"}
-  CSV.read "#{DOWNLOAD_DIR}/#{download_filename}", quote_char: "|"
+  def output_discrepencies(subject, data)
+    logger = File.open("./not_tracked_in_#{subject}_discrepancies.json", "a+")
+    logger.write(data.to_json)
+    logger.close
+  end
 end
 
-def search_in_usaa(driver)
-  # Simple/rough cache so I don't have to peg USAA
-  # @todo Smart'en this up to check if the file exists first
-  # file = File.open "./usaa_cache.json"
-  # cached = JSON.load file
-  # return cached unless cached.empty?
+class Scraper
+  include Logger
 
-  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
-  previous_window_handle = driver.window_handle
+  WEBDRIVER_URL = "http://127.0.0.1:4444/wd/hub".freeze
+  DOWNLOAD_DIR = "./budgets".freeze
+  DRIVER_TIMEOUT = 10
 
-  log "Opening tab for USAA..."
-  # Open new tab and navigate to usaa homepage
-  driver.execute_script("window.open()")
-  driver.switch_to.window( driver.window_handles.last )
-  driver.navigate.to "https://www.usaa.com/"
-  wait.until { driver.find_element(css: ".profileWidget") }
+  attr_reader :driver, :driver_url, :download_dir, :wait
 
-  log "Navigating to login screen..."
-  # Navigate to login screen
-  driver.find_element(css: ".profileWidget .profileWidget-button--logon").click
-  wait.until { driver.find_element(css: ".ent-logon-jump-body-container") }
+  def initialize(webdriver_url: WEBDRIVER_URL, download_dir: DOWNLOAD_DIR, driver_timeout: DRIVER_TIMEOUT)
+    log "Opening driver for #{self.class}..."
 
-  log "Logging in..."
-  # Enter login information
-  driver.find_element(css: ".ent-logon-jump-input[name='j_username']").send_keys "dudeman92"
-  # puts "Whats your USAA password?"
-  # pass = gets
-  # pass = pass.chomp
-  driver.find_element(css: ".ent-logon-jump-input[name='j_password']").send_keys "" # pass
-  driver.find_element(css: ".ent-logon-jump-button").click
+    @driver_url = webdriver_url
+    @download_dir = download_dir
+    @wait = Selenium::WebDriver::Wait.new(timeout: driver_timeout) # seconds
+    @driver = Selenium::WebDriver.for :chrome, url: driver_url
+  end
+end
 
-  log "Sending verification code..."
-  # Send verification code to default selected (should be text message)
-  wait.until { driver.find_element(css: ".usaa-button[value='Send']") }
-  driver.find_element(css: ".usaa-button[value='Send']").click
+class EverydollarScraper < Scraper
+  def download_everydollar_budget
+    # Scroll to bottom of page
+    driver.execute_script("document.querySelectorAll('.Budget-bottomActions')[0].scrollIntoView(false)")
 
-  log "Prepare to enter verification code on cell..."
-  wait.until { driver.find_element(css: ".notice.noticeUser") }
-  puts "What was that verification code you got on your phone?"
-  verification_code = gets
-  verification_code = verification_code.chomp
-  driver.find_element(css: "input[type='password']").send_keys verification_code
-  driver.find_element(css: "button[type='submit']").click
+    # Download CSV
+    download_csv_link = driver.find_element(css: ".Budget-bottomActions a.DownloadCSV")
+    download_filename = download_csv_link["download"]
 
-  log "Finding checking account..."
-  wait.until { driver.find_element(css: ".portalContent-container") }
-  driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
-  acct = nil
-  driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
-    puts "Checking element: #{e.text}"
-    if e.text.include? "USAA CLASSIC CHECKING"
-      acct = e
-      break
+    log "Starting download..."
+    download_csv_link.click
+
+    log "Waiting to for download to finish..."
+    wait.until { File.exist?(File.expand_path "#{DOWNLOAD_DIR}/#{download_filename}") }
+
+    if !File.exist?(File.expand_path "#{DOWNLOAD_DIR}/#{download_filename}")
+      log "Unable to download CSV", {
+          filename: download_filename,
+          download_element: download_csv_link.as_json
+      }
+    end
+
+    log "Successfully downloaded csv", {location: "#{DOWNLOAD_DIR}/#{download_filename}"}
+    CSV.read "#{DOWNLOAD_DIR}/#{download_filename}", quote_char: "|"
+  end
+
+  def login_to_everydollar
+    log "Navigating to main page..."
+    driver.navigate.to "https://www.everydollar.com/"
+
+    # Click login link
+    driver.find_elements(css: ".DesktopBanner .DesktopBanner-link[href='/app/sign-in'").first.click
+
+    wait.until { driver.find_element(css: "form.Panel-form") }
+
+    # Sign-in Form
+    log "Signing in..."
+    driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
+    puts "Whats your EveryDollar password?"
+    pass = gets
+    pass = pass.chomp
+    driver.find_element(css: "form.Panel-form input[type='password']").send_keys pass
+    driver.find_element(css: "form.Panel-form button[type='submit']").click
+
+    # Wait for budget to load
+    wait.until { driver.find_element(css: ".Budget-groupsList") }
+    announcement = driver.find_elements(css: "#Modal_close")
+    if announcement.size > 0
+      announcement.first.click
     end
   end
-  raise StandardError.new("Checking account not found.") if acct.nil?
 
-  log "Navigating to checking account page..."
-  acct.click
-  wait.until { driver.find_element(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr") }
-  purchase_amounts = []
+  def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
+    day_el = ed_easy_transaction_el.find_elements(css: ".day")
+    return nil if day_el.size == 0
+    return nil if day_el.first.text != "AUG"
 
-  log "Parsing transactions..."
-  driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
-    # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
-    # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
-    # so we grab .first and are on our happy path way.
-    found_quantity = transaction_row.find_elements(css: "td .dataQuantityNegative")
-    next if found_quantity.size == 0
-    amount_string = found_quantity.first.text
-    description = transaction_row.find_element(css: "td .transDesc").text
-    next if amount_string.nil?
+    integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").text
+    cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").text
+    amount_string = "#{integer}.#{cents}"
 
-    # Sanitize
-    amount_string["($"] = '' unless amount_string["($"].nil?
-    amount_string[")"] = '' unless amount_string[")"].nil?
-    amount_string[","] = '' unless amount_string[","].nil?
+    merchant = ed_easy_transaction_el.find_element(css: ".transaction-card-merchant").text
+    budget = ed_easy_transaction_el.find_element(css: ".transaction-card-budget-item").text
 
-    log "Amount found: $#{amount_string} - #{description}"
-    purchase_amounts << { amount: amount_string, descr: description }
+    return nil if usaa_amounts.include? amount_string
+
+    log "Discrepancy(not found in USAA) #{amount_string} for #{merchant} - #{budget}"
+
+    {amount: amount_string, desc: "#{merchant} - #{budget}"}
   end
 
-  log "Purchases from USAA...", purchase_amounts.to_json
+  def scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
+    day_el = ed_split_transaction_el.find_elements(css: ".day")
+    return if day_el.size == 0
+    return if day_el.first.text != "AUG"
 
-  driver.switch_to.window(previous_window_handle)
-  purchase_amounts
-end
+    integer_sum = 0
+    cents_sum = 0
+    merchants = []
+    ed_split_transaction_el.find_elements(css: ".split-transaction-card").each do |transaction|
+      integer_sum += transaction.find_element(css: ".money .money-integer").text.to_i
+      cents_sum += transaction.find_element(css: ".money .money-fractional").text.to_i
+      merchant = transaction.find_element(css: ".transaction-card-merchant").text
+      budget = transaction.find_element(css: ".transaction-card-budget-item").text
+      merchants << "#{merchant} - #{budget}"
+    end
+    integer_sum += cents_sum / 100
+    cents_sum = cents_sum % 100
+    amount_string = "#{integer_sum}.#{cents_sum}"
 
-def login_to_everydollar(driver)
-  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
-
-  log "Navigating to main page..."
-  driver.navigate.to "https://www.everydollar.com/"
-
-# Click login link
-  driver.find_elements(css: ".DesktopBanner .DesktopBanner-link[href='/app/sign-in'").first.click
-
-  wait.until { driver.find_element(css: "form.Panel-form") }
-
-# Sign-in Form
-  log "Signing in..."
-  driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
-  puts "Whats your EveryDollar password?"
-  pass = gets
-  pass = pass.chomp
-  driver.find_element(css: "form.Panel-form input[type='password']").send_keys pass
-  driver.find_element(css: "form.Panel-form button[type='submit']").click
-
-# Wait for budget to load
-  wait.until { driver.find_element(css: ".Budget-groupsList") }
-  announcement = driver.find_elements(css: "#Modal_close")
-  if announcement.size > 0
-    announcement.first.click
+    { amount: amount_string, desc: merchants.join(" & ") }
   end
-end
 
-def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
-  day_el = ed_easy_transaction_el.find_elements(css: ".day")
-  return nil if day_el.size == 0
-  return nil if day_el.first.text != "AUG"
+  def load_all_easy_transactions
+    driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
+    driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
 
-  integer = ed_easy_transaction_el.find_element(css: ".money .money-integer").text
-  cents = ed_easy_transaction_el.find_element(css: ".money .money-fractional").text
-  amount_string = "#{integer}.#{cents}"
-
-  merchant = ed_easy_transaction_el.find_element(css: ".transaction-card-merchant").text
-  budget = ed_easy_transaction_el.find_element(css: ".transaction-card-budget-item").text
-
-  return nil if usaa_amounts.include? amount_string
-
-  log "Discrepancy(not found in USAA) #{amount_string} for #{merchant} - #{budget}"
-
-  {amount: amount_string, desc: "#{merchant} - #{budget}"}
-end
-
-def scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
-  day_el = ed_split_transaction_el.find_elements(css: ".day")
-  return if day_el.size == 0
-  return if day_el.first.text != "AUG"
-
-  integer_sum = 0
-  cents_sum = 0
-  merchants = []
-  ed_split_transaction_el.find_elements(css: ".split-transaction-card").each do |transaction|
-    integer_sum += transaction.find_element(css: ".money .money-integer").text.to_i
-    cents_sum += transaction.find_element(css: ".money .money-fractional").text.to_i
-    merchant = transaction.find_element(css: ".transaction-card-merchant").text
-    budget = transaction.find_element(css: ".transaction-card-budget-item").text
-    merchants << "#{merchant} - #{budget}"
-  end
-  integer_sum += cents_sum / 100
-  cents_sum = cents_sum % 100
-  amount_string = "#{integer_sum}.#{cents_sum}"
-
-  { amount: amount_string, desc: merchants.join(" & ") }
-end
-
-def load_all_easy_transactions(driver)
-  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
-
-  driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
-  driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
-
-  wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
-  last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
-  day_el = last_transaction_el.find_elements(css: ".day")
-
-  while (day_el.size > 0 && day_el.first.text == "AUG")
-    driver.execute_script('document.querySelector(".TransactionDrawer-tabContent").scroll(0, 1000000000)')
+    wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
     last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
     day_el = last_transaction_el.find_elements(css: ".day")
+
+    while (day_el.size > 0 && day_el.first.text == "AUG")
+      driver.execute_script('document.querySelector(".TransactionDrawer-tabContent").scroll(0, 1000000000)')
+      last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
+      day_el = last_transaction_el.find_elements(css: ".day")
+    end
   end
 end
 
+class UsaaScraper < Scraper
+  def search_in_usaa
+    previous_window_handle = driver.window_handle
 
-log "Opening driver..."
-driver = Selenium::WebDriver.for :chrome, url: WEBDRIVER_URL
+    log "Opening tab for USAA..."
+    # Open new tab and navigate to usaa homepage
+    driver.execute_script("window.open()")
+    driver.switch_to.window( driver.window_handles.last )
+    driver.navigate.to "https://www.usaa.com/"
+    wait.until { driver.find_element(css: ".profileWidget") }
 
-login_to_everydollar(driver)
-load_all_easy_transactions(driver)
+    log "Navigating to login screen..."
+    # Navigate to login screen
+    driver.find_element(css: ".profileWidget .profileWidget-button--logon").click
+    wait.until { driver.find_element(css: ".ent-logon-jump-body-container") }
+
+    log "Logging in..."
+    # Enter login information
+    driver.find_element(css: ".ent-logon-jump-input[name='j_username']").send_keys "dudeman92"
+    # puts "Whats your USAA password?"
+    # pass = gets
+    # pass = pass.chomp
+    driver.find_element(css: ".ent-logon-jump-input[name='j_password']").send_keys "" # pass
+    driver.find_element(css: ".ent-logon-jump-button").click
+
+    log "Sending verification code..."
+    # Send verification code to default selected (should be text message)
+    wait.until { driver.find_element(css: ".usaa-button[value='Send']") }
+    driver.find_element(css: ".usaa-button[value='Send']").click
+
+    log "Prepare to enter verification code on cell..."
+    wait.until { driver.find_element(css: ".notice.noticeUser") }
+    puts "What was that verification code you got on your phone?"
+    verification_code = gets
+    verification_code = verification_code.chomp
+    driver.find_element(css: "input[type='password']").send_keys verification_code
+    driver.find_element(css: "button[type='submit']").click
+
+    log "Finding checking account..."
+    wait.until { driver.find_element(css: ".portalContent-container") }
+    driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
+    acct = nil
+    driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
+      puts "Checking element: #{e.text}"
+      if e.text.include? "USAA CLASSIC CHECKING"
+        acct = e
+        break
+      end
+    end
+    raise StandardError.new("Checking account not found.") if acct.nil?
+
+    log "Navigating to checking account page..."
+    acct.click
+    wait.until { driver.find_element(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr") }
+    purchase_amounts = []
+
+    log "Parsing transactions..."
+    driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
+      # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
+      # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
+      # so we grab .first and are on our happy path way.
+      found_quantity = transaction_row.find_elements(css: "td .dataQuantityNegative")
+      next if found_quantity.size == 0
+      amount_string = found_quantity.first.text
+      description = transaction_row.find_element(css: "td .transDesc").text
+      next if amount_string.nil?
+
+      # Sanitize
+      amount_string["($"] = '' unless amount_string["($"].nil?
+      amount_string[")"] = '' unless amount_string[")"].nil?
+      amount_string[","] = '' unless amount_string[","].nil?
+
+      log "Amount found: $#{amount_string} - #{description}"
+      purchase_amounts << { amount: amount_string, descr: description }
+    end
+
+    log "Purchases from USAA...", purchase_amounts.to_json
+
+    driver.switch_to.window(previous_window_handle)
+
+    purchase_amounts
+  end
+end
+
+ed_scraper = EverydollarScraper.new
+usaa_scraper = UsaaScraper.new
+
+ed_scraper.login_to_everydollar
+ed_scraper.load_all_easy_transactions
 
 usaa_transactions = search_in_usaa(driver)
 usaa_amounts = usaa_transactions.map {|t| t[:amount]}
