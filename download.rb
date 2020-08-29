@@ -136,6 +136,34 @@ def search_in_usaa(driver)
   purchase_amounts
 end
 
+def login_to_everydollar(driver)
+  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
+
+  log "Navigating to main page..."
+  driver.navigate.to "https://www.everydollar.com/"
+
+# Click login link
+  driver.find_elements(css: ".DesktopBanner .DesktopBanner-link[href='/app/sign-in'").first.click
+
+  wait.until { driver.find_element(css: "form.Panel-form") }
+
+# Sign-in Form
+  log "Signing in..."
+  driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
+  puts "Whats your EveryDollar password?"
+  pass = gets
+  pass = pass.chomp
+  driver.find_element(css: "form.Panel-form input[type='password']").send_keys pass
+  driver.find_element(css: "form.Panel-form button[type='submit']").click
+
+# Wait for budget to load
+  wait.until { driver.find_element(css: ".Budget-groupsList") }
+  announcement = driver.find_elements(css: "#Modal_close")
+  if announcement.size > 0
+    announcement.first.click
+  end
+end
+
 def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
   day_el = ed_easy_transaction_el.find_elements(css: ".day")
   return nil if day_el.size == 0
@@ -155,101 +183,15 @@ def scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
   {amount: amount_string, desc: "#{merchant} - #{budget}"}
 end
 
-def load_all_easy_transactions(driver)
-  last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
-  day_el = last_transaction_el.find_elements(css: ".day")
-
-  while (day_el.size > 0 && day_el.first.text == "AUG")
-    driver.execute_script('document.querySelector(".TransactionDrawer-tabContent").scroll(0, 1000000000)')
-    last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
-    day_el = last_transaction_el.find_elements(css: ".day")
-  end
-end
-
-wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
-
-log "Opening driver..."
-driver = Selenium::WebDriver.for :chrome, url: WEBDRIVER_URL
-
-log "Navigating to main page..."
-driver.navigate.to "https://www.everydollar.com/"
-
-# Click login link
-driver.find_elements(css: ".DesktopBanner .DesktopBanner-link[href='/app/sign-in'").first.click
-
-wait.until { driver.find_element(css: "form.Panel-form") }
-
-# Sign-in Form
-log "Signing in..."
-driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
-puts "Whats your EveryDollar password?"
-pass = gets
-pass = pass.chomp
-driver.find_element(css: "form.Panel-form input[type='password']").send_keys pass
-driver.find_element(css: "form.Panel-form button[type='submit']").click
-
-# Wait for budget to load
-wait.until { driver.find_element(css: ".Budget-groupsList") }
-announcement = driver.find_elements(css: "#Modal_close")
-if announcement.size > 0
-  announcement.first.click
-end
-
-usaa_transactions = search_in_usaa(driver)
-usaa_amounts = usaa_transactions.map {|t| t[:amount]}
-# data = download_budget(driver)
-
-# log "Reconciling ED -> USAA", {data: data}
-# not_tracked_in_usaa = []
-# data.each_with_index do |item, index|
-#   # header row
-#   next if index == 0
-#
-#   # The CSV file is read in such a way that it stores the strings with double quotes **sigh**
-#   next if item[2] != "\"expense\""
-#   next unless item[3]["07"].nil?
-#   amount_string = item.last
-#
-#   # Sanitize
-#   amount_string["\""] = ""
-#   amount_string["\""] = ""
-#   amount_string["-"] = "" unless amount_string["-"].nil?
-#   log "Processing #{amount_string}"
-#   next if usaa_amounts.include? amount_string
-#
-#   log "ED amount not in USAA: #{amount_string}"
-#   not_tracked_in_usaa << {amount: amount_string, desc: item[4]}
-# end
-
-driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
-driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
-
-wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
-ed_transactions = []
-not_tracked_in_usaa = []
-
-load_all_easy_transactions(driver)
-
-ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
-
-  result = scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
-  ed_transactions << result
-
-  next if result.nil?
-
-  not_tracked_in_usaa << result
-end
-
-ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
+def scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
   day_el = ed_split_transaction_el.find_elements(css: ".day")
-  next if day_el.size == 0
-  next if day_el.first.text != "AUG"
+  return if day_el.size == 0
+  return if day_el.first.text != "AUG"
 
   integer_sum = 0
   cents_sum = 0
   merchants = []
   ed_split_transaction_el.find_elements(css: ".split-transaction-card").each do |transaction|
-    binding.pry
     integer_sum += transaction.find_element(css: ".money .money-integer").text.to_i
     cents_sum += transaction.find_element(css: ".money .money-fractional").text.to_i
     merchant = transaction.find_element(css: ".transaction-card-merchant").text
@@ -260,17 +202,64 @@ ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collectio
   cents_sum = cents_sum % 100
   amount_string = "#{integer_sum}.#{cents_sum}"
 
-  ed_transactions << {amount: amount_string, desc: merchants.join(" & ")}
+  { amount: amount_string, desc: merchants.join(" & ") }
+end
 
-  next if usaa_amounts.include? amount_string
+def load_all_easy_transactions(driver)
+  wait = Selenium::WebDriver::Wait.new(timeout: 10) # seconds
 
-  log "Discrepancy(not found in USAA) - split transaction #{amount_string} for #{merchants.join(" & ")}"
-  not_tracked_in_usaa << {amount: amount_string, desc: merchants.join(" & ")}
+  driver.find_element(css: "#IconTray_transactions .IconTray-icon").click
+  driver.execute_script("document.querySelector('.TransactionsTabs-tab#allocated').click()")
+
+  wait.until { driver.find_element(css: ".ui-app-transaction-collection .transaction-card") }
+  last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
+  day_el = last_transaction_el.find_elements(css: ".day")
+
+  while (day_el.size > 0 && day_el.first.text == "AUG")
+    driver.execute_script('document.querySelector(".TransactionDrawer-tabContent").scroll(0, 1000000000)')
+    last_transaction_el = driver.find_element(css: '.ui-app-transaction-collection > div > div:last-child')
+    day_el = last_transaction_el.find_elements(css: ".day")
+  end
+end
+
+
+log "Opening driver..."
+driver = Selenium::WebDriver.for :chrome, url: WEBDRIVER_URL
+
+login_to_everydollar(driver)
+load_all_easy_transactions(driver)
+
+usaa_transactions = search_in_usaa(driver)
+usaa_amounts = usaa_transactions.map {|t| t[:amount]}
+
+ed_transactions = []
+not_tracked_in_usaa = []
+
+ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
+  result = scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
+  next if result.nil?
+
+  ed_transactions << result
+
+  next if usaa_amounts.include? result[:amount]
+
+  not_tracked_in_usaa << result
+end
+
+ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
+  result = scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
+  next if result.nil?
+
+  ed_transactions << result
+
+  next if usaa_amounts.include? result[:amount]
+
+  log "Discrepancy(not found in USAA) - split transaction #{result[:amount]} for #{result[:descr]}"
+  not_tracked_in_usaa << result
 end
 
 ed_amounts = ed_transactions.map {|t| t[:amount]}
 not_tracked_in_ed = []
-binding.pry
 usaa_transactions.each do |transaction|
   next if ed_amounts.include? transaction[:amount]
 
