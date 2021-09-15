@@ -230,51 +230,54 @@ class UsaaScraper < Scraper
   end
 end
 
-ed_scraper = EverydollarScraper.new
-usaa_scraper = UsaaScraper.new
+def scrape
+  ed_scraper = EverydollarScraper.new
+  usaa_scraper = UsaaScraper.new
 
-ed_scraper.login_to_everydollar
-ed_scraper.load_all_easy_transactions
+  ed_scraper.login_to_everydollar
+  ed_scraper.load_all_easy_transactions
 
-usaa_transactions = search_in_usaa(driver)
-usaa_amounts = usaa_transactions.map {|t| t[:amount]}
+  usaa_transactions = search_in_usaa(driver)
+  usaa_amounts = usaa_transactions.map {|t| t[:amount]}
 
-ed_transactions = []
-not_tracked_in_usaa = []
+  ed_transactions = []
+  not_tracked_in_usaa = []
 
-ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
-  result = scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
-  next if result.nil?
+  ed_easy_transactions = driver.find_elements(css: ".ui-app-transaction-collection .transaction-card").each do |ed_easy_transaction_el|
+    result = scrape_easy_transactions(ed_easy_transaction_el, usaa_amounts)
+    next if result.nil?
 
-  ed_transactions << result
+    ed_transactions << result
 
-  next if usaa_amounts.include? result[:amount]
+    next if usaa_amounts.include? result[:amount]
 
-  not_tracked_in_usaa << result
+    not_tracked_in_usaa << result
+  end
+
+  ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
+    result = scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
+    next if result.nil?
+
+    ed_transactions << result
+
+    next if usaa_amounts.include? result[:amount]
+
+    log "Discrepancy(not found in USAA) - split transaction #{result[:amount]} for #{result[:descr]}"
+    not_tracked_in_usaa << result
+  end
+
+  ed_amounts = ed_transactions.map {|t| t[:amount]}
+  not_tracked_in_ed = []
+  usaa_transactions.each do |transaction|
+    next if ed_amounts.include? transaction[:amount]
+
+    log "Discrepancy(not found in ED) - #{transaction[:amount]} for #{transaction[:descr]}"
+    not_tracked_in_ed << transaction
+  end
+
+  ed_scraper.output_discrepencies(:usaa, not_tracked_in_usaa)
+  ed_scraper.output_discrepencies(:everdollar, not_tracked_in_ed)
+
+  driver.quit
 end
 
-ed_split_transactions = driver.find_elements(css: ".ui-app-transaction-collection .split-transaction-card .card-body").each do |ed_split_transaction_el|
-  result = scrape_split_transactions(ed_split_transaction_el, usaa_amounts)
-  next if result.nil?
-
-  ed_transactions << result
-
-  next if usaa_amounts.include? result[:amount]
-
-  log "Discrepancy(not found in USAA) - split transaction #{result[:amount]} for #{result[:descr]}"
-  not_tracked_in_usaa << result
-end
-
-ed_amounts = ed_transactions.map {|t| t[:amount]}
-not_tracked_in_ed = []
-usaa_transactions.each do |transaction|
-  next if ed_amounts.include? transaction[:amount]
-
-  log "Discrepancy(not found in ED) - #{transaction[:amount]} for #{transaction[:descr]}"
-  not_tracked_in_ed << transaction
-end
-
-output_discrepencies(:usaa, not_tracked_in_usaa)
-output_discrepencies(:everdollar, not_tracked_in_ed)
-
-driver.quit
