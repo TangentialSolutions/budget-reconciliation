@@ -285,7 +285,7 @@ end
 def download
   ed_scraper = EverydollarScraper.new
   ed_scraper.login_to_everydollar
-  # ed_scraper.download_everydollar_budget
+  ed_scraper.download_everydollar_budget
 end
 
 download
