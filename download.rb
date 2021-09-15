@@ -3,7 +3,7 @@ require "json"
 require "csv"
 require "pry"
 
-module Logger
+module ScraperLogger
   def log(message, data = {})
     puts message
     logger = File.open("./download.json", "a+")
@@ -19,7 +19,7 @@ module Logger
 end
 
 class Scraper
-  include Logger
+  include ScraperLogger
 
   WEBDRIVER_URL = "http://127.0.0.1:4444/wd/hub".freeze
   DOWNLOAD_DIR = "./budgets".freeze
@@ -65,24 +65,25 @@ class EverydollarScraper < Scraper
 
   def login_to_everydollar
     log "Navigating to main page..."
-    driver.navigate.to "https://www.everydollar.com/"
-
-    # Click login link
-    driver.find_elements(css: ".DesktopBanner .DesktopBanner-link[href='/app/sign-in'").first.click
-
-    wait.until { driver.find_element(css: "form.Panel-form") }
+    driver.navigate.to "https://www.everydollar.com/app/sign-in"
 
     # Sign-in Form
     log "Signing in..."
-    driver.find_element(css: "form.Panel-form input[type='email']").send_keys "tbtrevbroaddus@gmail.com"
+    driver.find_element(css: "form#emailForm input#emailInput").send_keys "tbtrevbroaddus@gmail.com"
+    driver.find_element(css: "form#emailForm button[type='submit']").click
+
+    wait.until { driver.find_element(css: "div.auth0-login input[type='password']") }
+
     puts "Whats your EveryDollar password?"
     pass = gets
     pass = pass.chomp
-    driver.find_element(css: "form.Panel-form input[type='password']").send_keys pass
-    driver.find_element(css: "form.Panel-form button[type='submit']").click
+    driver.find_element(css: "div.auth0-login input[type='password']").send_keys pass
+    driver.find_element(css: "div.auth0-login button.auth0-lock-submit").click
 
     # Wait for budget to load
     wait.until { driver.find_element(css: ".Budget-groupsList") }
+
+    log "Budget loaded..."
     announcement = driver.find_elements(css: "#Modal_close")
     if announcement.size > 0
       announcement.first.click
@@ -281,3 +282,10 @@ def scrape
   driver.quit
 end
 
+def download
+  ed_scraper = EverydollarScraper.new
+  ed_scraper.login_to_everydollar
+  # ed_scraper.download_everydollar_budget
+end
+
+download
