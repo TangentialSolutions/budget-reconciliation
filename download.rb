@@ -35,6 +35,10 @@ class Scraper
     @wait = Selenium::WebDriver::Wait.new(timeout: driver_timeout) # seconds
     @driver = Selenium::WebDriver.for :chrome, url: driver_url
   end
+
+  def close
+    driver.close
+  end
 end
 
 class EverydollarScraper < Scraper
@@ -148,29 +152,31 @@ class EverydollarScraper < Scraper
 end
 
 class UsaaScraper < Scraper
-  def search_in_usaa
-    previous_window_handle = driver.window_handle
-
-    log "Opening tab for USAA..."
-    # Open new tab and navigate to usaa homepage
-    driver.execute_script("window.open()")
-    driver.switch_to.window( driver.window_handles.last )
+  def login_to_usaa
+    # previous_window_handle = driver.window_handle
+    #
+    # log "Opening tab for USAA..."
+    # # Open new tab and navigate to usaa homepage
+    # driver.execute_script("window.open()")
+    # driver.switch_to.window( driver.window_handles.last )
     driver.navigate.to "https://www.usaa.com/"
-    wait.until { driver.find_element(css: ".profileWidget") }
+    wait.until { driver.find_element(css: ".usaa-globalHeader-wrapper") }
 
     log "Navigating to login screen..."
     # Navigate to login screen
-    driver.find_element(css: ".profileWidget .profileWidget-button--logon").click
-    wait.until { driver.find_element(css: ".ent-logon-jump-body-container") }
+    driver.find_element(css: ".usaa-globalHeader-wrapper > a:last-of-type").click
+    wait.until { driver.find_element(css: ".miam-logon-form") }
 
     log "Logging in..."
     # Enter login information
-    driver.find_element(css: ".ent-logon-jump-input[name='j_username']").send_keys "dudeman92"
+    driver.find_element(css: ".miam-logon-form form input[name='memberId']").send_keys "dudeman92"
+    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
+    wait.until { driver.find_element(css: ".miam-logon-form form input[name='password']") }
     # puts "Whats your USAA password?"
     # pass = gets
     # pass = pass.chomp
-    driver.find_element(css: ".ent-logon-jump-input[name='j_password']").send_keys "" # pass
-    driver.find_element(css: ".ent-logon-jump-button").click
+    driver.find_element(css: ".miam-logon-form form input[name='password']").send_keys "" # pass
+    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
 
     log "Sending verification code..."
     # Send verification code to default selected (should be text message)
@@ -184,7 +190,36 @@ class UsaaScraper < Scraper
     verification_code = verification_code.chomp
     driver.find_element(css: "input[type='password']").send_keys verification_code
     driver.find_element(css: "button[type='submit']").click
+  end
 
+  def download_usaa_export
+    log "Finding checking account..."
+    wait.until { driver.find_element(css: ".portalContent-container") }
+    driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
+    acct = nil
+    driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
+      puts "Checking element: #{e.text}"
+      if e.text.include? "USAA CLASSIC CHECKING"
+        acct = e
+        break
+      end
+    end
+    raise StandardError.new("Checking account not found.") if acct.nil?
+
+    log "Navigating to checking account page..."
+    acct.click
+    wait.until { driver.find_element(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr") }
+
+    export_link = nil
+    driver.find_elements(css: "#account-transactions-header .transtable-controls ul.first-of-type li a").each do |a|
+      export_link = a if a.text.downcase.include? "export"
+    end
+    raise StandardError.new("Couldn't find export link.") if export_link.nil?
+
+    export_link.click
+  end
+
+  def generate_transaction_csv
     log "Finding checking account..."
     wait.until { driver.find_element(css: ".portalContent-container") }
     driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
@@ -204,6 +239,9 @@ class UsaaScraper < Scraper
     purchase_amounts = []
 
     log "Parsing transactions..."
+    filename = "#{DOWNLOAD_DIR}/09-2021-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
+    csv = CSV.open(filename)
+    csv << %w[description amount]
     driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
       # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
       # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
@@ -220,14 +258,11 @@ class UsaaScraper < Scraper
       amount_string[","] = '' unless amount_string[","].nil?
 
       log "Amount found: $#{amount_string} - #{description}"
-      purchase_amounts << { amount: amount_string, descr: description }
+      csv << [description, amount_string]
     end
+    csv.close
 
-    log "Purchases from USAA...", purchase_amounts.to_json
-
-    driver.switch_to.window(previous_window_handle)
-
-    purchase_amounts
+    log "Saved purchases to #{filename}..."
   end
 end
 
@@ -283,9 +318,15 @@ def scrape
 end
 
 def download
-  ed_scraper = EverydollarScraper.new
-  ed_scraper.login_to_everydollar
-  ed_scraper.download_everydollar_budget
+  # ed_scraper = EverydollarScraper.new
+  # ed_scraper.login_to_everydollar
+  # ed_scraper.download_everydollar_budget
+  # ed_scraper.close
+
+  bank_scraper = UsaaScraper.new
+  bank_scraper.login_to_usaa
+  bank_scraper.generate_transaction_csv
+  bank_scraper.close
 end
 
 download
