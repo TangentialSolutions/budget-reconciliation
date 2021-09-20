@@ -22,7 +22,7 @@ class Scraper
   include ScraperLogger
 
   WEBDRIVER_URL = "http://127.0.0.1:4444/wd/hub".freeze
-  DOWNLOAD_DIR = "./budgets".freeze
+  DOWNLOAD_DIR = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets".freeze
   DRIVER_TIMEOUT = 10
 
   attr_reader :driver, :driver_url, :download_dir, :wait
@@ -152,46 +152,6 @@ class EverydollarScraper < Scraper
 end
 
 class UsaaScraper < Scraper
-  def login_to_usaa
-    # previous_window_handle = driver.window_handle
-    #
-    # log "Opening tab for USAA..."
-    # # Open new tab and navigate to usaa homepage
-    # driver.execute_script("window.open()")
-    # driver.switch_to.window( driver.window_handles.last )
-    driver.navigate.to "https://www.usaa.com/"
-    wait.until { driver.find_element(css: ".usaa-globalHeader-wrapper") }
-
-    log "Navigating to login screen..."
-    # Navigate to login screen
-    driver.find_element(css: ".usaa-globalHeader-wrapper > a:last-of-type").click
-    wait.until { driver.find_element(css: ".miam-logon-form") }
-
-    log "Logging in..."
-    # Enter login information
-    driver.find_element(css: ".miam-logon-form form input[name='memberId']").send_keys "dudeman92"
-    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
-    wait.until { driver.find_element(css: ".miam-logon-form form input[name='password']") }
-    # puts "Whats your USAA password?"
-    # pass = gets
-    # pass = pass.chomp
-    driver.find_element(css: ".miam-logon-form form input[name='password']").send_keys "" # pass
-    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
-
-    log "Sending verification code..."
-    # Send verification code to default selected (should be text message)
-    wait.until { driver.find_element(css: ".usaa-button[value='Send']") }
-    driver.find_element(css: ".usaa-button[value='Send']").click
-
-    log "Prepare to enter verification code on cell..."
-    wait.until { driver.find_element(css: ".notice.noticeUser") }
-    puts "What was that verification code you got on your phone?"
-    verification_code = gets
-    verification_code = verification_code.chomp
-    driver.find_element(css: "input[type='password']").send_keys verification_code
-    driver.find_element(css: "button[type='submit']").click
-  end
-
   def download_usaa_export
     log "Finding checking account..."
     wait.until { driver.find_element(css: ".portalContent-container") }
@@ -219,6 +179,52 @@ class UsaaScraper < Scraper
     export_link.click
   end
 
+  def login_to_usaa
+    # previous_window_handle = driver.window_handle
+    #
+    # log "Opening tab for USAA..."
+    # # Open new tab and navigate to usaa homepage
+    # driver.execute_script("window.open()")
+    # driver.switch_to.window( driver.window_handles.last )
+    driver.navigate.to "https://www.usaa.com/"
+    wait.until { driver.find_element(css: ".usaa-globalHeader-wrapper") }
+
+    log "Navigating to login screen..."
+    # Navigate to login screen
+    driver.find_element(css: ".usaa-globalHeader-wrapper > a:last-of-type").click
+    wait.until { driver.find_element(css: ".miam-logon-form form input[name='memberId']") }
+
+    log "Logging in..."
+    # Enter login information
+    driver.find_element(css: ".miam-logon-form form input[name='memberId']").send_keys "dudeman92"
+    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
+    wait.until { driver.find_element(css: ".miam-logon-form form input[name='password']") }
+    # puts "Whats your USAA password?"
+    # pass = gets
+    # pass = pass.chomp
+    driver.find_element(css: ".miam-logon-form form input[name='password']").send_keys "" # pass
+    driver.find_element(css: ".miam-logon-form form button[type='submit']").click
+
+    log "Sending verification code..."
+    # Send verification code to default selected (should be text message)
+    wait.until { driver.find_element(css: ".optionsContain .miam-choice-container a.main-label") }
+    email_link = nil
+    driver.find_elements(css: ".optionsContain .miam-choice-container a.main-label").each do |a|
+      email_link = a if a.text.downcase.include? "email security code to:"
+    end
+    raise StandardError.new("Can not find email verification link.") if email_link.nil?
+
+    email_link.click
+
+    log "Prepare to enter verification code in email..."
+    wait.until { driver.find_element(css: "span.usaa-input") }
+    puts "What was that verification code you got via email?"
+    verification_code = gets
+    verification_code = verification_code.chomp
+    driver.find_element(css: "span.usaa-input input[name='inputValue']").send_keys verification_code
+    driver.find_element(css: "button[type='submit']").click
+  end
+
   def generate_transaction_csv
     log "Finding checking account..."
     wait.until { driver.find_element(css: ".portalContent-container") }
@@ -226,7 +232,7 @@ class UsaaScraper < Scraper
     acct = nil
     driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
       puts "Checking element: #{e.text}"
-      if e.text.include? "USAA CLASSIC CHECKING"
+      if e.text.downcase.include? "usaa classic checking"
         acct = e
         break
       end
@@ -240,7 +246,7 @@ class UsaaScraper < Scraper
 
     log "Parsing transactions..."
     filename = "#{DOWNLOAD_DIR}/09-2021-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
-    csv = CSV.open(filename)
+    csv = CSV.open(filename, "wb")
     csv << %w[description amount]
     driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
       # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
