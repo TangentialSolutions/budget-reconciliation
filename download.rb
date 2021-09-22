@@ -324,10 +324,10 @@ def scrape
 end
 
 def download
-  # ed_scraper = EverydollarScraper.new
-  # ed_scraper.login_to_everydollar
-  # ed_scraper.download_everydollar_budget
-  # ed_scraper.close
+  ed_scraper = EverydollarScraper.new
+  ed_scraper.login_to_everydollar
+  ed_scraper.download_everydollar_budget
+  ed_scraper.close
 
   bank_scraper = UsaaScraper.new
   bank_scraper.login_to_usaa
