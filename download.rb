@@ -247,7 +247,7 @@ class UsaaScraper < Scraper
     log "Parsing transactions..."
     filename = "#{DOWNLOAD_DIR}/09-2021-01-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
     csv = CSV.open(filename, "wb")
-    csv << %w[merchant amount]
+    csv << %w[Merchant Amount]
     driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
       # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
       # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
