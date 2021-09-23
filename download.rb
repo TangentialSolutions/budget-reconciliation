@@ -245,26 +245,42 @@ class UsaaScraper < Scraper
     purchase_amounts = []
 
     log "Parsing transactions..."
-    filename = "#{DOWNLOAD_DIR}/09-2021-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
+    filename = "#{DOWNLOAD_DIR}/09-2021-01-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
     csv = CSV.open(filename, "wb")
-    csv << %w[description amount]
+    csv << %w[merchant amount]
     driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
       # Transactions that are income (not expenses) will not have this class. Using #find_elements allows us to
       # get an empty [] as a return, which lets us know if it exists or not. We know there is only one element,
       # so we grab .first and are on our happy path way.
-      found_quantity = transaction_row.find_elements(css: "td .dataQuantityNegative")
-      next if found_quantity.size == 0
-      amount_string = found_quantity.first.text
-      description = transaction_row.find_element(css: "td .transDesc").text
-      next if amount_string.nil?
+      amount_string = ""
+      found_expense_quantity = transaction_row.find_elements(css: "td .dataQuantityNegative")
+      found_income_quantity = transaction_row.find_elements(css: "td.yui-dt0-col-Amount > .yui-dt-liner")
+      if found_expense_quantity.size != 0
+        amount_string = found_expense_quantity.first.text
+      else
+        amount_string = found_income_quantity.first.text
+      end
+      merchant = transaction_row.find_element(css: "td .transDesc").text
+      if amount_string.empty?
+        log "-- Couldn't find transaction amount"
+      end
 
-      # Sanitize
-      amount_string["($"] = '' unless amount_string["($"].nil?
-      amount_string[")"] = '' unless amount_string[")"].nil?
+      # Sanitize big numbers
       amount_string[","] = '' unless amount_string[","].nil?
 
-      log "Amount found: $#{amount_string} - #{description}"
-      csv << [description, amount_string]
+      # Sanitize debit amounts
+      unless amount_string["($"].nil?
+        amount_string["($"] = "-"
+        amount_string[")"] = ""
+      end
+
+      # Sanitize income amounts
+      unless amount_string["$"].nil?
+        amount_string["$"] = ""
+      end
+
+      log "Amount found: $#{amount_string} - #{merchant}"
+      csv << [merchant, amount_string]
     end
     csv.close
 

@@ -14,7 +14,7 @@ class Reconcile
   end
 
   def load_usaa_transactions
-    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/09-2021-Usaa-Transactions.csv"
+    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/09-2021-00-Usaa-Transactions.csv"
     CSV.foreach(filepath, headers: true) do |row|
       
     end
