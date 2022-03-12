@@ -1,3 +1,16 @@
+#!/Users/trevorbroaddus/.rvm/rubies/ruby-2.6.3/bin/ruby
+
+# @notes
+#
+# Reconciliation does a rough guess at which transactions are missing from USAA, and which are missing from Everydollar.
+# The following are not considered when reporting missing transactions:
+#
+# - Split charges in Everydollar
+#   - these are exported as separate charges in the .csv
+#   - in the future, the `download.rb` script will scrape the webpage instead of using the default CSV download link
+# - Transfers in USAA and Everydollar
+#   - both platforms allow transferring money between accounts (or line-items in ED speak)
+
 require "csv"
 
 class Reconcile
@@ -88,7 +101,7 @@ class Reconcile
   end
 
   def load_usaa_transactions
-    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/09-2021-01-Usaa-Transactions.csv"
+    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/03-2022-00-Usaa-Transactions.csv"
     CSV.foreach(filepath, headers: true) do |row|
       row = row.to_hash
       amount = row["Amount"]
@@ -99,8 +112,8 @@ class Reconcile
   end
 
   def load_ed_transactions
-    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/09-2021-EveryDollar-Transactions.csv"
-    CSV.foreach(filepath, headers: true) do |row|
+    filepath = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/budgets/03-2022-EveryDollar-Transactions.csv"
+    CSV.foreach(filepath, headers: true, encoding: "bom|utf-8") do |row|
       row = row.to_hash
       amount = row["Amount"]
       type = amount["-"].nil? ? :deposit : :debit
