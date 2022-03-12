@@ -1,3 +1,5 @@
+#!/Users/trevorbroaddus/.rvm/rubies/ruby-2.6.3/bin/ruby
+
 require "selenium-webdriver"
 require "json"
 require "csv"
@@ -152,19 +154,10 @@ class EverydollarScraper < Scraper
 end
 
 class UsaaScraper < Scraper
+  SCREENSHOT_DIR = "/Users/trevorbroaddus/Documents/Projects/budget-reconciliation/debugging".freeze
+
   def download_usaa_export
-    log "Finding checking account..."
-    wait.until { driver.find_element(css: ".portalContent-container") }
-    driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
-    acct = nil
-    driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
-      puts "Checking element: #{e.text}"
-      if e.text.include? "USAA CLASSIC CHECKING"
-        acct = e
-        break
-      end
-    end
-    raise StandardError.new("Checking account not found.") if acct.nil?
+    acct = find_checking_account
 
     log "Navigating to checking account page..."
     acct.click
@@ -177,6 +170,9 @@ class UsaaScraper < Scraper
     raise StandardError.new("Couldn't find export link.") if export_link.nil?
 
     export_link.click
+  rescue StandardError => e
+    driver.save_screenshot("#{SCREENSHOT_DIR}/download_usaa_export-#{SecureRandom.uuid}.png")
+    raise e
   end
 
   def login_to_usaa
@@ -199,10 +195,10 @@ class UsaaScraper < Scraper
     driver.find_element(css: ".miam-logon-form form input[name='memberId']").send_keys "dudeman92"
     driver.find_element(css: ".miam-logon-form form button[type='submit']").click
     wait.until { driver.find_element(css: ".miam-logon-form form input[name='password']") }
-    # puts "Whats your USAA password?"
-    # pass = gets
-    # pass = pass.chomp
-    driver.find_element(css: ".miam-logon-form form input[name='password']").send_keys "" # pass
+    puts "Whats your USAA password?"
+    pass = gets
+    pass = pass.chomp
+    driver.find_element(css: ".miam-logon-form form input[name='password']").send_keys pass
     driver.find_element(css: ".miam-logon-form form button[type='submit']").click
 
     log "Sending verification code..."
@@ -223,21 +219,13 @@ class UsaaScraper < Scraper
     verification_code = verification_code.chomp
     driver.find_element(css: "span.usaa-input input[name='inputValue']").send_keys verification_code
     driver.find_element(css: "button[type='submit']").click
+  rescue StandardError => e
+    driver.save_screenshot("#{SCREENSHOT_DIR}/login_to_usaa-#{SecureRandom.uuid}.png")
+    raise e
   end
 
   def generate_transaction_csv
-    log "Finding checking account..."
-    wait.until { driver.find_element(css: ".portalContent-container") }
-    driver.navigate.to driver.find_element(css: ".gadgets-gadget").attribute("src")
-    acct = nil
-    driver.find_elements(css: ".accountNameSection .acctName a").each do |e|
-      puts "Checking element: #{e.text}"
-      if e.text.downcase.include? "usaa classic checking"
-        acct = e
-        break
-      end
-    end
-    raise StandardError.new("Checking account not found.") if acct.nil?
+    acct = find_checking_account
 
     log "Navigating to checking account page..."
     acct.click
@@ -245,7 +233,7 @@ class UsaaScraper < Scraper
     purchase_amounts = []
 
     log "Parsing transactions..."
-    filename = "#{DOWNLOAD_DIR}/09-2021-01-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
+    filename = "#{DOWNLOAD_DIR}/03-2022-00-Usaa-Transactions.csv" # @todo rewrite so that filename is dynamic
     csv = CSV.open(filename, "wb")
     csv << %w[Merchant Amount]
     driver.find_elements(css: "#AccountSummaryTransactionTable tbody.yui-dt-data tr").each do |transaction_row|
@@ -285,6 +273,31 @@ class UsaaScraper < Scraper
     csv.close
 
     log "Saved purchases to #{filename}..."
+  rescue StandardError => e
+    driver.save_screenshot("#{SCREENSHOT_DIR}/generate_transaction_csv-#{SecureRandom.uuid}.png")
+    raise e
+  end
+
+  private
+
+  def find_checking_account
+    log "Finding checking account..."
+    wait.until { driver.find_element(css: ".member-home-container.list") }
+    acct = nil
+    driver.find_elements(css: ".products-list li.banking a").each do |a|
+      e = a.find_element(css: ".product-name")
+      puts "Checking element: #{e.text}"
+      if e.text.downcase.include? "usaa classic checking"
+        acct = a
+        break
+      end
+    end
+    raise StandardError.new("Checking account not found.") if acct.nil?
+
+    acct
+  rescue StandardError => e
+    driver.save_screenshot("#{SCREENSHOT_DIR}/find_checking_account-#{SecureRandom.uuid}.png")
+    raise e
   end
 end
 
@@ -345,10 +358,10 @@ def download
   ed_scraper.download_everydollar_budget
   ed_scraper.close
 
-  bank_scraper = UsaaScraper.new
-  bank_scraper.login_to_usaa
-  bank_scraper.generate_transaction_csv
-  bank_scraper.close
+  # bank_scraper = UsaaScraper.new
+  # bank_scraper.login_to_usaa
+  # bank_scraper.generate_transaction_csv
+  # bank_scraper.close
 end
 
 download
